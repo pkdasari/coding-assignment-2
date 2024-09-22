@@ -1,0 +1,76 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Centralized Event Logging Lambda Function StackSet'
+
+Parameters:
+  CustomerAccountId:
+    Type: String
+    Description: 'Customer AWS Account ID'
+  ArchiveAccountId:
+    Type: String
+    Description: 'Shared AWS Account ID where logs are stored'
+  BucketName:
+    Type: String
+    Description: 'S3 bucket for centralized logs'
+  LambdaFunctionName:
+    Type: String
+    Description: 'Name of the Lambda function to log events'
+
+Resources:
+  # IAM Role for Lambda
+  LambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: 
+        Fn::Sub: '${LambdaFunctionName}-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service: 'lambda.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'LambdaS3Access'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action: 's3:PutObject'
+                Resource: 
+                  Fn::Sub: 'arn:aws:s3:::${BucketName}/${CustomerAccountId}/*'
+
+  # Lambda Function
+  LogEventLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: 
+        Ref: LambdaFunctionName
+      Handler: 'index.handler'
+      Role: 
+        Fn::GetAtt: 
+          - LambdaExecutionRole
+          - Arn
+      Runtime: 'python3.9'
+      Timeout: 30
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import datetime
+
+          s3 = boto3.client('s3')
+
+          def handler(event, context):
+              account_id = event['account_id']
+              log_data = event['log_data']
+              now = datetime.datetime.utcnow()
+              file_path = f"{account_id}/{now.year}/{now.day}/{now.month}/{now.hour}_{now.minute}_{now.second}.json"
+              s3.put_object(Bucket='${BucketName}', Key=file_path, Body=json.dumps(log_data))
+
+Outputs:
+  LambdaFunctionArn:
+    Value: 
+      Fn::GetAtt: 
+        - LogEventLambda
+        - Arn
+    Description: 'The ARN of the deployed Lambda function'
